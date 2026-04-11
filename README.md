@@ -51,3 +51,18 @@ your NVIDIA Shield via ADB.
 - Network debugging must be enabled on the Shield (Settings → Developer Options → Network Debugging)
 - The script uses a debug signing key — this is fine for sideloaded apps
 - If you update TizenTube, just re-run the script with the new `--release` version
+
+## Acknowledgments
+
+This project bundles the following open-source tools:
+
+- [apktool](https://github.com/iBotPeaches/Apktool) — Apache License 2.0
+- [uber-apk-signer](https://github.com/nicoulaj/uber-apk-signer/) — Apache License 2.0
+
+## Disclaimer
+
+This project is not affiliated with, endorsed by, or associated with Google, YouTube, or Cobalt. YouTube and the YouTube logo are trademarks of Google LLC. All product names and trademarks are the property of their respective owners. This tool is provided for personal use only.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
