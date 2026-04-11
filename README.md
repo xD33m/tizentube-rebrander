@@ -61,7 +61,7 @@ your Android TV device via ADB.
 This project bundles the following open-source tools:
 
 - [apktool](https://github.com/iBotPeaches/Apktool) — Apache License 2.0
-- [uber-apk-signer](https://github.com/nicoulaj/uber-apk-signer/) — Apache License 2.0
+- [uber-apk-signer](https://github.com/patrickfav/uber-apk-signer) — Apache License 2.0
 
 ## Disclaimer
 
