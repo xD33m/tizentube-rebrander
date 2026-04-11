@@ -79,10 +79,15 @@ sedi() {
 # Extract image dimensions using ImageMagick identify
 get_image_size() {
   if [[ "$MAGICK" == "magick" ]]; then
-    magick identify -format '%w %h' "$1" 2>/dev/null
+    MSYS_NO_PATHCONV=1 magick identify -format '%w %h' "$1" 2>/dev/null || true
   else
-    identify -format '%w %h' "$1" 2>/dev/null
+    identify -format '%w %h' "$1" 2>/dev/null || true
   fi
+}
+
+# Resize wrapper that suppresses MSYS path mangling on Windows
+magick_resize() {
+  MSYS_NO_PATHCONV=1 "$MAGICK" "$1" -resize "${2}x${3}!" "$4"
 }
 
 # ──────────────────────────── package manager detection ───────────
@@ -218,7 +223,21 @@ if [[ -z "$RELEASE" ]]; then
   fi
   ok "Latest release: ${RELEASE}"
 fi
-TIZENTUBE_APK_URL="https://github.com/${TIZENTUBE_REPO}/releases/download/${RELEASE}/cobalt-arm64.apk"
+
+# ──────────────────────────── detect device ABI ──────────────────
+if [[ "$DRY_RUN" != true ]]; then
+  DEVICE_ABI=$(adb shell getprop ro.product.cpu.abilist 2>/dev/null | tr -d '\r' | cut -d',' -f1)
+  case "$DEVICE_ABI" in
+    arm64-v8a)  APK_VARIANT="cobalt-arm64.apk" ;;
+    armeabi-v7a|armeabi) APK_VARIANT="cobalt-arm.apk" ;;
+    *) fail "Unsupported device ABI: ${DEVICE_ABI:-unknown}. Available APKs: cobalt-arm64.apk, cobalt-arm.apk" ;;
+  esac
+  info "Detected device ABI: ${DEVICE_ABI} → ${APK_VARIANT}"
+else
+  APK_VARIANT="cobalt-arm64.apk"
+  info "Dry run — defaulting to ${APK_VARIANT}"
+fi
+TIZENTUBE_APK_URL="https://github.com/${TIZENTUBE_REPO}/releases/download/${RELEASE}/${APK_VARIANT}"
 
 # ──────────────────────────── work dir ────────────────────────────
 if [[ -d "$WORK_DIR" ]]; then
@@ -249,7 +268,7 @@ else
 fi
 
 # ──────────────────────────── download TizenTube ──────────────────
-TIZENTUBE_APK="${WORK_DIR}/cobalt-arm64.apk"
+TIZENTUBE_APK="${WORK_DIR}/${APK_VARIANT}"
 info "Downloading TizenTube Cobalt ${RELEASE}..."
 curl -L --fail -o "$TIZENTUBE_APK" "$TIZENTUBE_APK_URL" \
   || fail "Failed to download TizenTube from $TIZENTUBE_APK_URL"
@@ -298,7 +317,8 @@ for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
     if [[ -n "$dims" ]]; then
       w=$(echo "$dims" | cut -d' ' -f1)
       h=$(echo "$dims" | cut -d' ' -f2)
-      "$MAGICK" "$src" -resize "${w}x${h}!" "$dst"
+      magick_resize "$src" "$w" "$h" "$dst" \
+        || fail "ImageMagick failed to resize icon for ${density} (${w}x${h})"
     else
       cp "$src" "$dst"
     fi
@@ -314,9 +334,14 @@ if [[ -f "$YT_BANNER" ]]; then
     dst="${COBALT_DIR}/res/drawable-${density}/app_banner.png"
     if [[ -f "$dst" ]]; then
       dims=$(get_image_size "$dst")
-      w=$(echo "$dims" | cut -d' ' -f1)
-      h=$(echo "$dims" | cut -d' ' -f2)
-      "$MAGICK" "$YT_BANNER" -resize "${w}x${h}!" "$dst"
+      if [[ -n "$dims" ]]; then
+        w=$(echo "$dims" | cut -d' ' -f1)
+        h=$(echo "$dims" | cut -d' ' -f2)
+        magick_resize "$YT_BANNER" "$w" "$h" "$dst" \
+          || fail "ImageMagick failed to resize banner for ${density} (${w}x${h})"
+      else
+        cp "$YT_BANNER" "$dst"
+      fi
     fi
   done
   ok "Banners replaced."
@@ -347,7 +372,7 @@ if [[ "$DRY_RUN" == true ]]; then
   info "Dry run — skipping uninstall/install. Signed APK at: ${SIGNED_APK}"
 else
   info "Uninstalling old TizenTube (${TIZENTUBE_PACKAGE})..."
-  adb uninstall "$TIZENTUBE_PACKAGE" 2>&1 || true
+  adb uninstall "$TIZENTUBE_PACKAGE" &>/dev/null || true
 
   info "Installing rebranded APK..."
   adb install "$SIGNED_APK" 2>&1 | tail -3
