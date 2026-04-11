@@ -4,7 +4,7 @@
 #
 # Automatically downloads TizenTube Cobalt, rebrands it as "YouTube" using
 # bundled icons from the official YouTube for Android TV app, then rebuilds,
-# signs, and installs it on a connected NVIDIA Shield.
+# signs, and installs it on a connected Android TV device.
 #
 # Bundled in tools/:
 #   - apktool.jar
@@ -17,13 +17,13 @@
 #   - curl              — built into most systems
 #
 # Usage:
-#   ./rebrand-tizentube.sh [--shield-ip 192.168.0.168] [--release v1.0.8]
+#   ./rebrand-tizentube.sh [--device-ip 192.168.0.168] [--release v1.0.8]
 #
 
 set -euo pipefail
 
 # ──────────────────────────── defaults ────────────────────────────
-SHIELD_IP="${SHIELD_IP:-}"
+DEVICE_IP="${DEVICE_IP:-}"
 RELEASE="${RELEASE:-v1.0.8}"
 ADB_PORT="5555"
 TIZENTUBE_APK_URL="https://github.com/reisxd/TizenTubeCobalt/releases/download/${RELEASE}/cobalt-arm64.apk"
@@ -42,12 +42,12 @@ WORK_DIR="${SCRIPT_DIR}/build"
 # ──────────────────────────── parse args ──────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --shield-ip) SHIELD_IP="$2"; shift 2 ;;
+    --device-ip) DEVICE_IP="$2"; shift 2 ;;
     --release)   RELEASE="$2"; TIZENTUBE_APK_URL="https://github.com/reisxd/TizenTubeCobalt/releases/download/${RELEASE}/cobalt-arm64.apk"; shift 2 ;;
     --app-name)  NEW_APP_NAME="$2"; shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
     --help|-h)
-      echo "Usage: $0 [--shield-ip IP] [--release vX.Y.Z] [--app-name NAME] [--dry-run]"
+      echo "Usage: $0 [--device-ip IP] [--release vX.Y.Z] [--app-name NAME] [--dry-run]"
       exit 0 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
@@ -200,14 +200,14 @@ rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 info "Working directory: $WORK_DIR"
 
-# ──────────────────────────── connect shield ──────────────────────
-if [[ -n "$SHIELD_IP" ]]; then
-  info "Connecting to Shield at ${SHIELD_IP}:${ADB_PORT}..."
-  adb connect "${SHIELD_IP}:${ADB_PORT}" 2>&1 | grep -qE "connected|already" \
-    || fail "Could not connect to Shield. Check IP and that network debugging is enabled."
-  ok "Connected to Shield."
+# ──────────────────────────── connect device ──────────────────────
+if [[ -n "$DEVICE_IP" ]]; then
+  info "Connecting to device at ${DEVICE_IP}:${ADB_PORT}..."
+  adb connect "${DEVICE_IP}:${ADB_PORT}" 2>&1 | grep -qE "connected|already" \
+    || fail "Could not connect to device. Check IP and that network debugging is enabled."
+  ok "Connected to device."
 else
-  info "No --shield-ip provided, assuming Shield is already connected."
+  info "No --device-ip provided, assuming device is already connected."
 fi
 
 # Verify device is reachable (skip header line by matching transport_id or device product)
@@ -305,7 +305,7 @@ if [[ -z "$SIGNED_APK" ]] || [[ ! -f "$SIGNED_APK" ]]; then
 fi
 ok "APK signed: $(basename "$SIGNED_APK")"
 
-# ──────────────────────────── install on Shield ───────────────────
+# ──────────────────────────── install on device ───────────────────
 if [[ "$DRY_RUN" == true ]]; then
   info "Dry run — skipping uninstall/install. Signed APK at: ${SIGNED_APK}"
 else
@@ -317,9 +317,9 @@ else
 
   # Verify
   if adb shell pm list packages | grep -q "$TIZENTUBE_PACKAGE"; then
-    ok "Successfully installed! '${NEW_APP_NAME}' is now on your Shield."
+    ok "Successfully installed! '${NEW_APP_NAME}' is now on your device."
   else
-    fail "Installation may have failed. Check your Shield."
+    fail "Installation may have failed. Check your device."
   fi
 fi
 
@@ -327,4 +327,4 @@ fi
 info "Keeping signed APK at: ${SIGNED_APK}"
 info "Working directory: ${WORK_DIR}"
 echo ""
-ok "All done! TizenTube Cobalt is now disguised as '${NEW_APP_NAME}' on your Shield."
+ok "All done! TizenTube Cobalt is now disguised as '${NEW_APP_NAME}' on your device."

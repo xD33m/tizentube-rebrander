@@ -1,8 +1,8 @@
-# Shield TizenTube Rebrander
+# TizenTube YouTube Rebrander
 
 Automatically downloads [TizenTube Cobalt](https://github.com/reisxd/TizenTubeCobalt),
 rebrands it as "YouTube" (name + official icons), signs it, and installs it on
-your NVIDIA Shield via ADB.
+your Android TV device via ADB.
 
 ## Prerequisites
 
@@ -28,14 +28,14 @@ your NVIDIA Shield via ADB.
 ## Usage
 
 ```bash
-# Basic — connects to Shield and does everything
-./rebrand-tizentube.sh --shield-ip 192.168.0.168
+# Basic — connects to your Android TV device and does everything
+./rebrand-tizentube.sh --device-ip 192.168.0.168
 
 # Specify a different TizenTube release
-./rebrand-tizentube.sh --shield-ip 192.168.0.168 --release v1.0.8
+./rebrand-tizentube.sh --device-ip 192.168.0.168 --release v1.0.8
 
 # Custom app name
-./rebrand-tizentube.sh --shield-ip 192.168.0.168 --app-name "YouTube"
+./rebrand-tizentube.sh --device-ip 192.168.0.168 --app-name "YouTube"
 ```
 
 ## What it does
@@ -48,7 +48,7 @@ your NVIDIA Shield via ADB.
 
 ## Notes
 
-- Network debugging must be enabled on the Shield (Settings → Developer Options → Network Debugging)
+- Network debugging must be enabled on your Android TV device (Settings → Developer Options → Network Debugging)
 - The script uses a debug signing key — this is fine for sideloaded apps
 - If you update TizenTube, just re-run the script with the new `--release` version
 
