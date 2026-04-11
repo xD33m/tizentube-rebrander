@@ -42,9 +42,9 @@ WORK_DIR="${SCRIPT_DIR}/build"
 # ──────────────────────────── parse args ──────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --device-ip) DEVICE_IP="$2"; shift 2 ;;
-    --release)   RELEASE="$2"; TIZENTUBE_APK_URL="https://github.com/reisxd/TizenTubeCobalt/releases/download/${RELEASE}/cobalt-arm64.apk"; shift 2 ;;
-    --app-name)  NEW_APP_NAME="$2"; shift 2 ;;
+    --device-ip) [[ -n "${2:-}" ]] || fail "--device-ip requires an argument"; DEVICE_IP="$2"; shift 2 ;;
+    --release)   [[ -n "${2:-}" ]] || fail "--release requires an argument"; RELEASE="$2"; TIZENTUBE_APK_URL="https://github.com/reisxd/TizenTubeCobalt/releases/download/${RELEASE}/cobalt-arm64.apk"; shift 2 ;;
+    --app-name)  [[ -n "${2:-}" ]] || fail "--app-name requires an argument"; NEW_APP_NAME="$2"; shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
     --help|-h)
       echo "Usage: $0 [--device-ip IP] [--release vX.Y.Z] [--app-name NAME] [--dry-run]"
@@ -68,9 +68,13 @@ sedi() {
   fi
 }
 
-# Extract image dimensions portably (no grep -P)
+# Extract image dimensions using ImageMagick identify
 get_image_size() {
-  file "$1" | sed -E -n 's/.* ([0-9]+) x ([0-9]+).*/\1 \2/p' | head -1
+  if [[ "$MAGICK" == "magick" ]]; then
+    magick identify -format '%w %h' "$1" 2>/dev/null
+  else
+    identify -format '%w %h' "$1" 2>/dev/null
+  fi
 }
 
 # ──────────────────────────── package manager detection ───────────
@@ -142,7 +146,7 @@ prompt_install() {
   answer="${answer:-y}"
   if [[ "$answer" =~ ^[Yy]$ ]]; then
     info "Running: $cmd"
-    eval "$cmd" || fail "Failed to install '$dep'. Install it manually and re-run."
+    $cmd || fail "Failed to install '$dep'. Install it manually and re-run."
     ok "'$dep' installed."
   else
     fail "'$dep' is required. Install it manually and re-run."
@@ -231,15 +235,18 @@ ok "Decompiled TizenTube."
 # ──────────────────────────── change app name ─────────────────────
 info "Changing app name to '${NEW_APP_NAME}'..."
 
+# Escape special sed characters in app name
+SAFE_APP_NAME=$(printf '%s' "$NEW_APP_NAME" | sed 's/[&\\|/]/\\&/g')
+
 # strings.xml
 STRINGS_FILE="${COBALT_DIR}/res/values/strings.xml"
 if [[ -f "$STRINGS_FILE" ]]; then
-  sedi "s|<string name=\"app_name\">.*</string>|<string name=\"app_name\">${NEW_APP_NAME}</string>|" "$STRINGS_FILE"
+  sedi "s|<string name=\"app_name\">.*</string>|<string name=\"app_name\">${SAFE_APP_NAME}</string>|" "$STRINGS_FILE"
 fi
 
 # AndroidManifest.xml label
 MANIFEST="${COBALT_DIR}/AndroidManifest.xml"
-sedi "s|android:label=\"[^\"]*\"|android:label=\"${NEW_APP_NAME}\"|g" "$MANIFEST"
+sedi "s|android:label=\"[^\"]*\"|android:label=\"${SAFE_APP_NAME}\"|g" "$MANIFEST"
 
 # Fix extractNativeLibs for rebuilt APK
 sedi 's|android:extractNativeLibs=\"false\"|android:extractNativeLibs=\"true\"|' "$MANIFEST"
@@ -261,7 +268,7 @@ for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
     if [[ -n "$dims" ]]; then
       w=$(echo "$dims" | cut -d' ' -f1)
       h=$(echo "$dims" | cut -d' ' -f2)
-      $MAGICK "$src" -resize "${w}x${h}!" "$dst"
+      "$MAGICK" "$src" -resize "${w}x${h}!" "$dst"
     else
       cp "$src" "$dst"
     fi
@@ -279,7 +286,7 @@ if [[ -f "$YT_BANNER" ]]; then
       dims=$(get_image_size "$dst")
       w=$(echo "$dims" | cut -d' ' -f1)
       h=$(echo "$dims" | cut -d' ' -f2)
-      $MAGICK "$YT_BANNER" -resize "${w}x${h}!" "$dst"
+      "$MAGICK" "$YT_BANNER" -resize "${w}x${h}!" "$dst"
     fi
   done
   ok "Banners replaced."
