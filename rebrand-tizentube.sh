@@ -18,15 +18,16 @@
 #
 # Usage:
 #   ./rebrand-tizentube.sh [--device-ip 192.168.0.168] [--release v1.0.8]
+#   If --release is omitted, the latest release is fetched from GitHub.
 #
 
 set -euo pipefail
 
 # ──────────────────────────── defaults ────────────────────────────
 DEVICE_IP="${DEVICE_IP:-}"
-RELEASE="${RELEASE:-v1.0.8}"
+RELEASE="${RELEASE:-}"
 ADB_PORT="5555"
-TIZENTUBE_APK_URL="https://github.com/reisxd/TizenTubeCobalt/releases/download/${RELEASE}/cobalt-arm64.apk"
+TIZENTUBE_REPO="reisxd/TizenTubeCobalt"
 TIZENTUBE_PACKAGE="io.gh.reisxd.tizentube.cobalt"
 NEW_APP_NAME="YouTube"
 DRY_RUN=false
@@ -43,7 +44,7 @@ WORK_DIR="${SCRIPT_DIR}/build"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --device-ip) [[ -n "${2:-}" ]] || fail "--device-ip requires an argument"; DEVICE_IP="$2"; shift 2 ;;
-    --release)   [[ -n "${2:-}" ]] || fail "--release requires an argument"; RELEASE="$2"; TIZENTUBE_APK_URL="https://github.com/reisxd/TizenTubeCobalt/releases/download/${RELEASE}/cobalt-arm64.apk"; shift 2 ;;
+    --release)   [[ -n "${2:-}" ]] || fail "--release requires an argument"; RELEASE="$2"; shift 2 ;;
     --app-name)  [[ -n "${2:-}" ]] || fail "--app-name requires an argument"; NEW_APP_NAME="$2"; shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
     --help|-h)
@@ -54,10 +55,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ──────────────────────────── helpers ─────────────────────────────
-info()  { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
-ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
-warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
-fail()  { echo -e "\033[1;31m[FAIL]\033[0m  $*"; exit 1; }
+if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
+  info()  { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
+  ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
+  warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
+  fail()  { echo -e "\033[1;31m[FAIL]\033[0m  $*"; exit 1; }
+else
+  info()  { echo "[INFO]  $*"; }
+  ok()    { echo "[OK]    $*"; }
+  warn()  { echo "[WARN]  $*"; }
+  fail()  { echo "[FAIL]  $*"; exit 1; }
+fi
 
 # Cross-platform sed -i (macOS requires backup suffix)
 sedi() {
@@ -199,31 +207,53 @@ fi
 [[ -d "${ASSETS_DIR}/icons" ]] || fail "Icon assets not found at ${ASSETS_DIR}/icons"
 ok "All prerequisites found (bundled tools + system commands)."
 
+# ──────────────────────────── resolve release ─────────────────────
+if [[ -z "$RELEASE" ]]; then
+  info "No --release specified, fetching latest from GitHub..."
+  RELEASE=$(curl -sL "https://api.github.com/repos/${TIZENTUBE_REPO}/releases/latest" \
+    | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/') \
+    || true
+  if [[ -z "$RELEASE" ]]; then
+    fail "Could not determine latest release. Specify one with --release vX.Y.Z"
+  fi
+  ok "Latest release: ${RELEASE}"
+fi
+TIZENTUBE_APK_URL="https://github.com/${TIZENTUBE_REPO}/releases/download/${RELEASE}/cobalt-arm64.apk"
+
 # ──────────────────────────── work dir ────────────────────────────
-rm -rf "$WORK_DIR"
+if [[ -d "$WORK_DIR" ]]; then
+  if [[ -d "${WORK_DIR}/signed" ]]; then
+    warn "Previous build found in ${WORK_DIR}/signed — it will be overwritten."
+  fi
+  rm -rf "$WORK_DIR"
+fi
 mkdir -p "$WORK_DIR"
 info "Working directory: $WORK_DIR"
 
 # ──────────────────────────── connect device ──────────────────────
-if [[ -n "$DEVICE_IP" ]]; then
-  info "Connecting to device at ${DEVICE_IP}:${ADB_PORT}..."
-  adb connect "${DEVICE_IP}:${ADB_PORT}" 2>&1 | grep -qE "connected|already" \
-    || fail "Could not connect to device. Check IP and that network debugging is enabled."
-  ok "Connected to device."
-else
-  info "No --device-ip provided, assuming device is already connected."
-fi
+if [[ "$DRY_RUN" != true ]]; then
+  if [[ -n "$DEVICE_IP" ]]; then
+    info "Connecting to device at ${DEVICE_IP}:${ADB_PORT}..."
+    adb connect "${DEVICE_IP}:${ADB_PORT}" 2>&1 | grep -qE "connected|already" \
+      || fail "Could not connect to device. Check IP and that network debugging is enabled."
+    ok "Connected to device."
+  else
+    info "No --device-ip provided, assuming device is already connected."
+  fi
 
-# Verify device is reachable (skip header line by matching transport_id or device product)
-adb devices -l | grep -qE '\bdevice\b.*transport_id' || fail "No ADB device found. Connect a device first."
-ok "ADB device detected."
+  # Verify device is reachable (skip header line by matching transport_id or device product)
+  adb devices -l | grep -qE '\bdevice\b.*transport_id' || fail "No ADB device found. Connect a device first."
+  ok "ADB device detected."
+else
+  info "Dry run — skipping device connection."
+fi
 
 # ──────────────────────────── download TizenTube ──────────────────
 TIZENTUBE_APK="${WORK_DIR}/cobalt-arm64.apk"
 info "Downloading TizenTube Cobalt ${RELEASE}..."
 curl -L --fail -o "$TIZENTUBE_APK" "$TIZENTUBE_APK_URL" \
   || fail "Failed to download TizenTube from $TIZENTUBE_APK_URL"
-ok "Downloaded TizenTube Cobalt ($(ls -lh "$TIZENTUBE_APK" | awk '{print $5}'))."
+ok "Downloaded TizenTube Cobalt ($(du -h "$TIZENTUBE_APK" | cut -f1))."
 
 # ──────────────────────────── decompile TizenTube ─────────────────
 COBALT_DIR="${WORK_DIR}/cobalt-decompiled"

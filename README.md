@@ -28,14 +28,17 @@ your Android TV device via ADB.
 ## Usage
 
 ```bash
-# Basic — connects to your Android TV device and does everything
+# Basic — connects to your Android TV device, fetches latest release, and does everything
 ./rebrand-tizentube.sh --device-ip 192.168.0.168
 
-# Specify a different TizenTube release
+# Pin a specific TizenTube release
 ./rebrand-tizentube.sh --device-ip 192.168.0.168 --release v1.0.8
 
 # Custom app name
 ./rebrand-tizentube.sh --device-ip 192.168.0.168 --app-name "YouTube"
+
+# Dry run — build the APK without connecting to or installing on a device
+./rebrand-tizentube.sh --dry-run
 ```
 
 ## What it does
@@ -50,7 +53,8 @@ your Android TV device via ADB.
 
 - Network debugging must be enabled on your Android TV device (Settings → Developer Options → Network Debugging)
 - The script uses a debug signing key — this is fine for sideloaded apps
-- If you update TizenTube, just re-run the script with the new `--release` version
+- If `--release` is omitted, the latest release is automatically fetched from GitHub
+- Supports [NO_COLOR](https://no-color.org/) — set `NO_COLOR=1` to disable colored output
 
 ## Acknowledgments
 
