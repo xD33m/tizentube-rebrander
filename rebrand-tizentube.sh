@@ -224,6 +224,33 @@ if [[ -z "$RELEASE" ]]; then
   ok "Latest release: ${RELEASE}"
 fi
 
+# ──────────────────────────── connect device ──────────────────────
+if [[ "$DRY_RUN" != true ]]; then
+  if [[ -n "$DEVICE_IP" ]]; then
+    info "Connecting to device at ${DEVICE_IP}:${ADB_PORT}..."
+    ADB_CONNECT_OUT=$(adb connect "${DEVICE_IP}:${ADB_PORT}" 2>&1) || true
+    if ! echo "$ADB_CONNECT_OUT" | grep -qE "connected|already"; then
+      fail "Could not connect to device: ${ADB_CONNECT_OUT}\n       Check IP and that network debugging is enabled."
+    fi
+    ok "Connected to device."
+  else
+    info "No --device-ip provided, assuming device is already connected."
+  fi
+
+  # Verify device is reachable
+  ADB_DEVICES_OUT=$(adb devices -l 2>&1)
+  if echo "$ADB_DEVICES_OUT" | tail -n +2 | grep -q "unauthorized"; then
+    fail "Device is connected but unauthorized.\n       Check the TV screen for an ADB authorization prompt and tap 'Always allow from this computer'.\n       If no prompt appears, revoke USB debugging authorizations in Developer Options and reconnect."
+  elif echo "$ADB_DEVICES_OUT" | tail -n +2 | grep -q "offline"; then
+    fail "Device is connected but offline. Try: adb disconnect ${DEVICE_IP}:${ADB_PORT} && adb connect ${DEVICE_IP}:${ADB_PORT}"
+  elif ! echo "$ADB_DEVICES_OUT" | tail -n +2 | grep -qE '\bdevice\b'; then
+    fail "No ADB device found. 'adb devices -l' output:\n${ADB_DEVICES_OUT}"
+  fi
+  ok "ADB device detected."
+else
+  info "Dry run — skipping device connection."
+fi
+
 # ──────────────────────────── detect device ABI ──────────────────
 if [[ "$DRY_RUN" != true ]]; then
   DEVICE_ABI=$(adb shell getprop ro.product.cpu.abilist 2>/dev/null | tr -d '\r' | cut -d',' -f1)
@@ -248,24 +275,6 @@ if [[ -d "$WORK_DIR" ]]; then
 fi
 mkdir -p "$WORK_DIR"
 info "Working directory: $WORK_DIR"
-
-# ──────────────────────────── connect device ──────────────────────
-if [[ "$DRY_RUN" != true ]]; then
-  if [[ -n "$DEVICE_IP" ]]; then
-    info "Connecting to device at ${DEVICE_IP}:${ADB_PORT}..."
-    adb connect "${DEVICE_IP}:${ADB_PORT}" 2>&1 | grep -qE "connected|already" \
-      || fail "Could not connect to device. Check IP and that network debugging is enabled."
-    ok "Connected to device."
-  else
-    info "No --device-ip provided, assuming device is already connected."
-  fi
-
-  # Verify device is reachable (skip header line by matching transport_id or device product)
-  adb devices -l | grep -qE '\bdevice\b.*transport_id' || fail "No ADB device found. Connect a device first."
-  ok "ADB device detected."
-else
-  info "Dry run — skipping device connection."
-fi
 
 # ──────────────────────────── download TizenTube ──────────────────
 TIZENTUBE_APK="${WORK_DIR}/${APK_VARIANT}"
