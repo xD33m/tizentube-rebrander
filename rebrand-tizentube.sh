@@ -302,12 +302,12 @@ if [[ -f "$STRINGS_FILE" ]]; then
   sedi "s|<string name=\"app_name\">.*</string>|<string name=\"app_name\">${SAFE_APP_NAME}</string>|" "$STRINGS_FILE"
 fi
 
-# AndroidManifest.xml label
+# AndroidManifest.xml label (handle both android: and apktool 3.x n0:/n1: namespace prefixes)
 MANIFEST="${COBALT_DIR}/AndroidManifest.xml"
-sedi "s|android:label=\"[^\"]*\"|android:label=\"${SAFE_APP_NAME}\"|g" "$MANIFEST"
+sedi -E 's|(android\|n[0-9]+):label="[^"]*"|\1:label="'"${SAFE_APP_NAME}"'"|g' "$MANIFEST"
 
-# Fix extractNativeLibs for rebuilt APK
-sedi 's|android:extractNativeLibs=\"false\"|android:extractNativeLibs=\"true\"|' "$MANIFEST"
+# Fix extractNativeLibs for rebuilt APK (handle both android: and n0:/n1: prefixes)
+sedi -E 's|(android\|n[0-9]+):extractNativeLibs="false"|\1:extractNativeLibs="true"|' "$MANIFEST"
 
 ok "App name set to '${NEW_APP_NAME}'."
 
@@ -320,7 +320,9 @@ fi
 
 for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
   src="${ASSETS_DIR}/icons/ic_launcher_${density}.png"
+  # apktool 3.x may strip extensions — try both ic_app.png and ic_app
   dst="${COBALT_DIR}/res/mipmap-${density}/ic_app.png"
+  [[ -f "$dst" ]] || dst="${COBALT_DIR}/res/mipmap-${density}/ic_app"
   if [[ -f "$src" ]] && [[ -f "$dst" ]]; then
     dims=$(get_image_size "$dst")
     if [[ -n "$dims" ]]; then
@@ -340,7 +342,9 @@ info "Replacing banners..."
 YT_BANNER="${ASSETS_DIR}/banners/app_banner.png"
 if [[ -f "$YT_BANNER" ]]; then
   for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+    # apktool 3.x may strip extensions — try both app_banner.png and app_banner
     dst="${COBALT_DIR}/res/drawable-${density}/app_banner.png"
+    [[ -f "$dst" ]] || dst="${COBALT_DIR}/res/drawable-${density}/app_banner"
     if [[ -f "$dst" ]]; then
       dims=$(get_image_size "$dst")
       if [[ -n "$dims" ]]; then
