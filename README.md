@@ -63,8 +63,7 @@ terminal after an install so the new tools are on your PATH.
 ./rebrand.sh --app twitch --device-ip 192.168.0.168 --clean-install
 ```
 
-Run `./rebrand.sh --help` for the full option list. The old entry point
-`rebrand-tizentube.sh` still works — it forwards to `rebrand.sh`.
+Run `./rebrand.sh --help` for the full option list.
 
 ## What it does
 
