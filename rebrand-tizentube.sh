@@ -2,9 +2,13 @@
 #
 # rebrand-tizentube.sh
 #
-# Automatically downloads TizenTube Cobalt, rebrands it as "YouTube" using
-# bundled icons from the official YouTube for Android TV app, then rebuilds,
-# signs, and installs it on a connected Android TV device.
+# Downloads an open-source Android TV client, rebrands it as the official app it
+# replaces (name + icons + banner) using assets extracted from the real app, then
+# rebuilds, signs, and installs it on a connected Android TV device.
+#
+# Supported apps (--app):
+#   tizentube  TizenTube Cobalt (reisxd/TizenTubeCobalt)  -> "YouTube"
+#   twitch     SmartTwitchTV    (fgl27/SmartTwitchTV)     -> "Twitch"
 #
 # Bundled in tools/:
 #   - apktool.jar
@@ -18,7 +22,7 @@
 #   - curl              — built into most systems
 #
 # Usage:
-#   ./rebrand-tizentube.sh [--device-ip 192.168.0.168] [--release v1.0.8]
+#   ./rebrand-tizentube.sh [--app tizentube|twitch] [--device-ip 192.168.0.168] [--release TAG]
 #   If --release is omitted, the latest release is fetched from GitHub.
 #
 
@@ -28,9 +32,8 @@ set -euo pipefail
 DEVICE_IP="${DEVICE_IP:-}"
 RELEASE="${RELEASE:-}"
 ADB_PORT="5555"
-TIZENTUBE_REPO="reisxd/TizenTubeCobalt"
-TIZENTUBE_PACKAGE="io.gh.reisxd.tizentube.cobalt"
-NEW_APP_NAME="YouTube"
+APP="${APP:-tizentube}"
+NEW_APP_NAME=""   # falls back to the profile's name unless --app-name is given
 DRY_RUN=false
 
 # Resolve script directory for local assets and tools
@@ -44,12 +47,13 @@ WORK_DIR="${SCRIPT_DIR}/build"
 # ──────────────────────────── parse args ──────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --device-ip) [[ -n "${2:-}" ]] || fail "--device-ip requires an argument"; DEVICE_IP="$2"; shift 2 ;;
-    --release)   [[ -n "${2:-}" ]] || fail "--release requires an argument"; RELEASE="$2"; shift 2 ;;
-    --app-name)  [[ -n "${2:-}" ]] || fail "--app-name requires an argument"; NEW_APP_NAME="$2"; shift 2 ;;
+    --app)       [[ -n "${2:-}" ]] || { echo "--app requires an argument"; exit 1; }; APP="$2"; shift 2 ;;
+    --device-ip) [[ -n "${2:-}" ]] || { echo "--device-ip requires an argument"; exit 1; }; DEVICE_IP="$2"; shift 2 ;;
+    --release)   [[ -n "${2:-}" ]] || { echo "--release requires an argument"; exit 1; }; RELEASE="$2"; shift 2 ;;
+    --app-name)  [[ -n "${2:-}" ]] || { echo "--app-name requires an argument"; exit 1; }; NEW_APP_NAME="$2"; shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
     --help|-h)
-      echo "Usage: $0 [--device-ip IP] [--release vX.Y.Z] [--app-name NAME] [--dry-run]"
+      echo "Usage: $0 [--app tizentube|twitch] [--device-ip IP] [--release TAG] [--app-name NAME] [--dry-run]"
       exit 0 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
@@ -190,7 +194,50 @@ check_or_install() {
   fi
 }
 
+# ──────────────────────────── app profiles ────────────────────────
+# Each profile says where the app comes from, what to rename it to, and which
+# files inside the decompiled APK are overwritten by which bundled asset.
+# ASSET_MAP entries are "<path under the profile's assets dir>|<path in the APK>".
+ASSET_MAP=()
+APK_PATTERN=""
+
+case "$APP" in
+  tizentube)
+    APP_REPO="reisxd/TizenTubeCobalt"
+    APP_PACKAGE="io.gh.reisxd.tizentube.cobalt"
+    APP_ASSETS="${ASSETS_DIR}/youtube"
+    APP_LABEL="TizenTube Cobalt"
+    NEEDS_ABI=true
+    : "${NEW_APP_NAME:=YouTube}"
+    for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+      ASSET_MAP+=("icons/ic_launcher_${density}.png|res/mipmap-${density}/ic_app.png")
+      ASSET_MAP+=("banners/app_banner.png|res/drawable-${density}/app_banner.png")
+    done
+    ;;
+  twitch)
+    APP_REPO="fgl27/SmartTwitchTV"
+    APP_PACKAGE="com.fgl27.twitch"
+    APP_ASSETS="${ASSETS_DIR}/twitch"
+    APP_LABEL="SmartTwitchTV"
+    NEEDS_ABI=false
+    APK_PATTERN="SmartTV_twitch_.*[.]apk"
+    : "${NEW_APP_NAME:=Twitch}"
+    ASSET_MAP=(
+      "banners/app_banner.png|res/drawable-xhdpi/banner.png"
+      "icons/ic_launcher.png|res/mipmap-nodpi/ic_launcher.png"
+      "icons/app_icon.png|res/mipmap-nodpi/app_icon.png"
+      "icons/ic_splash.png|res/mipmap-nodpi/ic_splash.png"
+      "icons/ic_launcher_adaptive_back.png|res/drawable-xhdpi/ic_launcher_adaptive_back.png"
+      "icons/ic_launcher_adaptive_fore.png|res/drawable-xhdpi/ic_launcher_adaptive_fore.png"
+    )
+    ;;
+  *)
+    echo "[FAIL]  Unknown --app '${APP}'. Supported: tizentube, twitch"
+    exit 1 ;;
+esac
+
 # ──────────────────────────── preflight ───────────────────────────
+info "App: ${APP_LABEL} (${APP_PACKAGE}) → rebranding as '${NEW_APP_NAME}'"
 info "Checking prerequisites..."
 
 PKG_MANAGER=$(detect_pkg_manager)
@@ -223,17 +270,17 @@ fi
 
 [[ -f "$APKTOOL_JAR" ]]      || fail "apktool.jar not found at ${APKTOOL_JAR}"
 [[ -f "$UBER_SIGNER_JAR" ]]  || fail "uber-apk-signer.jar not found at ${UBER_SIGNER_JAR}"
-[[ -d "${ASSETS_DIR}/icons" ]] || fail "Icon assets not found at ${ASSETS_DIR}/icons"
+[[ -d "${APP_ASSETS}/icons" ]] || fail "Icon assets not found at ${APP_ASSETS}/icons"
 ok "All prerequisites found (bundled tools + system commands)."
 
 # ──────────────────────────── resolve release ─────────────────────
 if [[ -z "$RELEASE" ]]; then
   info "No --release specified, fetching latest from GitHub..."
-  RELEASE=$(curl -sL "https://api.github.com/repos/${TIZENTUBE_REPO}/releases/latest" \
+  RELEASE=$(curl -sL "https://api.github.com/repos/${APP_REPO}/releases/latest" \
     | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/') \
     || true
   if [[ -z "$RELEASE" ]]; then
-    fail "Could not determine latest release. Specify one with --release vX.Y.Z"
+    fail "Could not determine latest release. Specify one with --release TAG"
   fi
   ok "Latest release: ${RELEASE}"
 fi
@@ -265,20 +312,33 @@ else
   info "Dry run — skipping device connection."
 fi
 
-# ──────────────────────────── detect device ABI ──────────────────
-if [[ "$DRY_RUN" != true ]]; then
-  DEVICE_ABI=$(adb shell getprop ro.product.cpu.abilist 2>/dev/null | tr -d '\r' | cut -d',' -f1)
-  case "$DEVICE_ABI" in
-    arm64-v8a)  APK_VARIANT="cobalt-arm64.apk" ;;
-    armeabi-v7a|armeabi) APK_VARIANT="cobalt-arm.apk" ;;
-    *) fail "Unsupported device ABI: ${DEVICE_ABI:-unknown}. Available APKs: cobalt-arm64.apk, cobalt-arm.apk" ;;
-  esac
-  info "Detected device ABI: ${DEVICE_ABI} → ${APK_VARIANT}"
+# ──────────────────────────── resolve APK url ─────────────────────
+if [[ "$NEEDS_ABI" == true ]]; then
+  # This app ships one APK per ABI under a fixed filename
+  if [[ "$DRY_RUN" != true ]]; then
+    DEVICE_ABI=$(adb shell getprop ro.product.cpu.abilist 2>/dev/null | tr -d '\r' | cut -d',' -f1)
+    case "$DEVICE_ABI" in
+      arm64-v8a)  APK_VARIANT="cobalt-arm64.apk" ;;
+      armeabi-v7a|armeabi) APK_VARIANT="cobalt-arm.apk" ;;
+      *) fail "Unsupported device ABI: ${DEVICE_ABI:-unknown}. Available APKs: cobalt-arm64.apk, cobalt-arm.apk" ;;
+    esac
+    info "Detected device ABI: ${DEVICE_ABI} → ${APK_VARIANT}"
+  else
+    APK_VARIANT="cobalt-arm64.apk"
+    info "Dry run — defaulting to ${APK_VARIANT}"
+  fi
+  APK_URL="https://github.com/${APP_REPO}/releases/download/${RELEASE}/${APK_VARIANT}"
 else
-  APK_VARIANT="cobalt-arm64.apk"
-  info "Dry run — defaulting to ${APK_VARIANT}"
+  # One universal APK whose filename carries the version — look it up by pattern
+  info "Looking up release asset matching ${APK_PATTERN}..."
+  APK_URL=$(curl -sL "https://api.github.com/repos/${APP_REPO}/releases/tags/${RELEASE}" \
+    | grep -oE '"browser_download_url": *"[^"]+"' \
+    | sed -E 's/.*"(https[^"]+)".*/\1/' \
+    | grep -E "/${APK_PATTERN}$" | head -1) || true
+  [[ -n "$APK_URL" ]] || fail "No release asset matching ${APK_PATTERN} in ${APP_REPO} ${RELEASE}"
+  APK_VARIANT="$(basename "$APK_URL")"
+  info "Release asset: ${APK_VARIANT}"
 fi
-TIZENTUBE_APK_URL="https://github.com/${TIZENTUBE_REPO}/releases/download/${RELEASE}/${APK_VARIANT}"
 
 # ──────────────────────────── work dir ────────────────────────────
 if [[ -d "$WORK_DIR" ]]; then
@@ -290,19 +350,19 @@ fi
 mkdir -p "$WORK_DIR"
 info "Working directory: $WORK_DIR"
 
-# ──────────────────────────── download TizenTube ──────────────────
-TIZENTUBE_APK="${WORK_DIR}/${APK_VARIANT}"
-info "Downloading TizenTube Cobalt ${RELEASE}..."
-curl -L --fail -o "$TIZENTUBE_APK" "$TIZENTUBE_APK_URL" \
-  || fail "Failed to download TizenTube from $TIZENTUBE_APK_URL"
-ok "Downloaded TizenTube Cobalt ($(du -h "$TIZENTUBE_APK" | cut -f1))."
+# ──────────────────────────── download APK ────────────────────────
+SOURCE_APK="${WORK_DIR}/${APK_VARIANT}"
+info "Downloading ${APP_LABEL} ${RELEASE}..."
+curl -L --fail -o "$SOURCE_APK" "$APK_URL" \
+  || fail "Failed to download ${APP_LABEL} from $APK_URL"
+ok "Downloaded ${APP_LABEL} ($(du -h "$SOURCE_APK" | cut -f1))."
 
-# ──────────────────────────── decompile TizenTube ─────────────────
-COBALT_DIR="${WORK_DIR}/cobalt-decompiled"
-info "Decompiling TizenTube..."
-java -jar "$APKTOOL_JAR" d "$TIZENTUBE_APK" -o "$COBALT_DIR" -f &>/dev/null \
+# ──────────────────────────── decompile ───────────────────────────
+DECOMPILED_DIR="${WORK_DIR}/decompiled"
+info "Decompiling ${APP_LABEL}..."
+java -jar "$APKTOOL_JAR" d "$SOURCE_APK" -o "$DECOMPILED_DIR" -f &>/dev/null \
   || fail "apktool decompile failed"
-ok "Decompiled TizenTube."
+ok "Decompiled ${APP_LABEL}."
 
 # ──────────────────────────── change app name ─────────────────────
 info "Changing app name to '${NEW_APP_NAME}'..."
@@ -311,13 +371,13 @@ info "Changing app name to '${NEW_APP_NAME}'..."
 SAFE_APP_NAME=$(printf '%s' "$NEW_APP_NAME" | sed 's/[&\\|/]/\\&/g')
 
 # strings.xml
-STRINGS_FILE="${COBALT_DIR}/res/values/strings.xml"
+STRINGS_FILE="${DECOMPILED_DIR}/res/values/strings.xml"
 if [[ -f "$STRINGS_FILE" ]]; then
   sedi "s|<string name=\"app_name\">.*</string>|<string name=\"app_name\">${SAFE_APP_NAME}</string>|" "$STRINGS_FILE"
 fi
 
 # AndroidManifest.xml label (handle both android: and apktool 3.x n0:/n1: namespace prefixes)
-MANIFEST="${COBALT_DIR}/AndroidManifest.xml"
+MANIFEST="${DECOMPILED_DIR}/AndroidManifest.xml"
 sedi -E 's|(android\|n[0-9]+):label="[^"]*"|\1:label="'"${SAFE_APP_NAME}"'"|g' "$MANIFEST"
 
 # Fix extractNativeLibs for rebuilt APK (handle both android: and n0:/n1: prefixes)
@@ -325,61 +385,43 @@ sedi -E 's|(android\|n[0-9]+):extractNativeLibs="false"|\1:extractNativeLibs="tr
 
 ok "App name set to '${NEW_APP_NAME}'."
 
-# ──────────────────────────── replace icons (from local assets) ───
-info "Replacing icons from bundled assets..."
+# ──────────────────────────── replace assets ──────────────────────
+info "Replacing icons and banners from bundled assets..."
 
-if [[ ! -d "${ASSETS_DIR}/icons" ]]; then
-  fail "Assets directory not found at ${ASSETS_DIR}/icons. Run from the script's directory."
-fi
-
-for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-  src="${ASSETS_DIR}/icons/ic_launcher_${density}.png"
-  # apktool 3.x may strip extensions — try both ic_app.png and ic_app
-  dst="${COBALT_DIR}/res/mipmap-${density}/ic_app.png"
-  [[ -f "$dst" ]] || dst="${COBALT_DIR}/res/mipmap-${density}/ic_app"
-  if [[ -f "$src" ]] && [[ -f "$dst" ]]; then
-    dims=$(get_image_size "$dst")
-    if [[ -n "$dims" ]]; then
-      w=$(echo "$dims" | cut -d' ' -f1)
-      h=$(echo "$dims" | cut -d' ' -f2)
-      magick_resize "$src" "$w" "$h" "$dst" \
-        || fail "ImageMagick failed to resize icon for ${density} (${w}x${h})"
-    else
-      cp "$src" "$dst"
-    fi
+REPLACED=0
+MISSING=()
+for entry in "${ASSET_MAP[@]}"; do
+  src="${APP_ASSETS}/${entry%%|*}"
+  dst="${DECOMPILED_DIR}/${entry#*|}"
+  if [[ ! -f "$src" ]]; then
+    MISSING+=("${entry%%|*}")
+    continue
   fi
+  # apktool 3.x may strip extensions — try both foo.png and foo
+  [[ -f "$dst" ]] || dst="${dst%.png}"
+  [[ -f "$dst" ]] || continue   # this density/variant isn't present in the APK
+  dims=$(get_image_size "$dst")
+  if [[ -n "$dims" ]]; then
+    w=$(echo "$dims" | cut -d' ' -f1)
+    h=$(echo "$dims" | cut -d' ' -f2)
+    magick_resize "$src" "$w" "$h" "$dst" \
+      || fail "ImageMagick failed to resize ${src} to ${w}x${h}"
+  else
+    cp "$src" "$dst"
+  fi
+  REPLACED=$((REPLACED + 1))
 done
-ok "Icons replaced."
 
-# ──────────────────────────── replace banners (from local assets) ─
-info "Replacing banners..."
-YT_BANNER="${ASSETS_DIR}/banners/app_banner.png"
-if [[ -f "$YT_BANNER" ]]; then
-  for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-    # apktool 3.x may strip extensions — try both app_banner.png and app_banner
-    dst="${COBALT_DIR}/res/drawable-${density}/app_banner.png"
-    [[ -f "$dst" ]] || dst="${COBALT_DIR}/res/drawable-${density}/app_banner"
-    if [[ -f "$dst" ]]; then
-      dims=$(get_image_size "$dst")
-      if [[ -n "$dims" ]]; then
-        w=$(echo "$dims" | cut -d' ' -f1)
-        h=$(echo "$dims" | cut -d' ' -f2)
-        magick_resize "$YT_BANNER" "$w" "$h" "$dst" \
-          || fail "ImageMagick failed to resize banner for ${density} (${w}x${h})"
-      else
-        cp "$YT_BANNER" "$dst"
-      fi
-    fi
-  done
-  ok "Banners replaced."
-else
-  info "No banner asset found at ${YT_BANNER}, skipping."
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  warn "Bundled assets missing, skipped: ${MISSING[*]}"
 fi
+[[ "$REPLACED" -gt 0 ]] || fail "No assets were replaced — the APK layout may have changed."
+ok "Replaced ${REPLACED} image(s)."
 
 # ──────────────────────────── rebuild APK ─────────────────────────
-UNSIGNED_APK="${WORK_DIR}/cobalt-unsigned.apk"
+UNSIGNED_APK="${WORK_DIR}/rebranded-unsigned.apk"
 info "Rebuilding APK..."
-java -jar "$APKTOOL_JAR" b "$COBALT_DIR" -o "$UNSIGNED_APK" &>/dev/null \
+java -jar "$APKTOOL_JAR" b "$DECOMPILED_DIR" -o "$UNSIGNED_APK" &>/dev/null \
   || fail "apktool build failed"
 ok "APK rebuilt."
 
@@ -398,14 +440,14 @@ ok "APK signed: $(basename "$SIGNED_APK")"
 if [[ "$DRY_RUN" == true ]]; then
   info "Dry run — skipping uninstall/install. Signed APK at: ${SIGNED_APK}"
 else
-  info "Uninstalling old TizenTube (${TIZENTUBE_PACKAGE})..."
-  adb uninstall "$TIZENTUBE_PACKAGE" &>/dev/null || true
+  info "Uninstalling old ${APP_LABEL} (${APP_PACKAGE})..."
+  adb uninstall "$APP_PACKAGE" &>/dev/null || true
 
   info "Installing rebranded APK..."
   adb install "$SIGNED_APK" 2>&1 | tail -3
 
   # Verify
-  if adb shell pm list packages | grep -q "$TIZENTUBE_PACKAGE"; then
+  if adb shell pm list packages | grep -q "$APP_PACKAGE"; then
     ok "Successfully installed! '${NEW_APP_NAME}' is now on your device."
   else
     fail "Installation may have failed. Check your device."
@@ -416,4 +458,4 @@ fi
 info "Keeping signed APK at: ${SIGNED_APK}"
 info "Working directory: ${WORK_DIR}"
 echo ""
-ok "All done! TizenTube Cobalt is now disguised as '${NEW_APP_NAME}' on your device."
+ok "All done! ${APP_LABEL} is now disguised as '${NEW_APP_NAME}' on your device."
