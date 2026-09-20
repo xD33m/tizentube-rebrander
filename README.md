@@ -66,29 +66,6 @@ terminal after an install so the new tools are on your PATH.
 4. Rebuilds and signs the APK (bundled uber-apk-signer)
 5. Uninstalls the old app and installs the rebranded version
 
-## Adding another app
-
-Each app is one `case` branch in the profile block near the top of the script.
-A profile sets the GitHub repo, package name, asset directory and new name, then
-lists an `ASSET_MAP` of `"<file under assets/<app>/>|<path inside the APK>"`
-pairs. Each source image is resized to the dimensions of the file it replaces, so
-the mapping is all you need — find the paths by decompiling the APK once with
-`java -jar tools/apktool.jar d <apk>` and looking at what `android:icon` and
-`android:banner` point to in `AndroidManifest.xml`.
-
-## Where the assets came from
-
-The icons and banners in `assets/` are the real ones, extracted from the official
-apps installed on an Android TV device:
-
-- `assets/twitch/banners/app_banner.png` and `assets/twitch/icons/ic_launcher.png`
-  are unmodified files from the official Twitch app (`tv.twitch.android.app`).
-  Note the launcher icon and banner live in the app's density split APK
-  (`split_config.xhdpi.apk`), not in `base.apk`.
-- The adaptive icon layers and the splash image are composed from those same
-  files: the glitch mark lifted onto transparency for the foreground, and the
-  brand purple `#9146FF` sampled from the originals for the background.
-
 ## Notes
 
 - Network debugging must be enabled on your Android TV device (Settings → Developer Options → Network Debugging)
