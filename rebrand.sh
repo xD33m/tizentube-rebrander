@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# rebrand-tizentube.sh
+# rebrand.sh
 #
 # Downloads an open-source Android TV client, rebrands it as the official app it
 # replaces (name + icons + banner) using assets extracted from the real app, then
@@ -22,7 +22,7 @@
 #   - curl              — built into most systems
 #
 # Usage:
-#   ./rebrand-tizentube.sh [--app tizentube|twitch] [--device-ip 192.168.0.168] [--release TAG]
+#   ./rebrand.sh [--app tizentube|twitch] [--device-ip 192.168.0.168] [--release TAG]
 #   If --release is omitted, the latest release is fetched from GitHub.
 #
 
@@ -35,6 +35,8 @@ ADB_PORT="5555"
 APP="${APP:-tizentube}"
 NEW_APP_NAME=""   # falls back to the profile's name unless --app-name is given
 DRY_RUN=false
+NO_CACHE=false
+FORCE_CLEAN_INSTALL=false
 
 # Resolve script directory for local assets and tools
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,6 +45,8 @@ TOOLS_DIR="${SCRIPT_DIR}/tools"
 APKTOOL_JAR="${TOOLS_DIR}/apktool.jar"
 UBER_SIGNER_JAR="${TOOLS_DIR}/uber-apk-signer.jar"
 WORK_DIR="${SCRIPT_DIR}/build"
+CACHE_DIR="${SCRIPT_DIR}/.cache"
+DIST_DIR="${SCRIPT_DIR}/dist"
 
 # ──────────────────────────── parse args ──────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -52,24 +56,38 @@ while [[ $# -gt 0 ]]; do
     --release)   [[ -n "${2:-}" ]] || { echo "--release requires an argument"; exit 1; }; RELEASE="$2"; shift 2 ;;
     --app-name)  [[ -n "${2:-}" ]] || { echo "--app-name requires an argument"; exit 1; }; NEW_APP_NAME="$2"; shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
+    --no-cache)  NO_CACHE=true; shift ;;
+    --clean-install) FORCE_CLEAN_INSTALL=true; shift ;;
     --help|-h)
-      echo "Usage: $0 [--app tizentube|twitch] [--device-ip IP] [--release TAG] [--app-name NAME] [--dry-run]"
+      cat <<'USAGE'
+Usage: rebrand.sh [options]
+
+  --app tizentube|twitch   Which app to rebrand (default: tizentube)
+  --device-ip IP           Connect to this Android TV over the network first
+  --release TAG            Pin a release tag (default: the latest)
+  --app-name NAME          Override the rebranded name
+  --dry-run                Build and sign, but do not touch a device
+  --no-cache               Re-download the APK even if it is already cached
+  --clean-install          Uninstall first, wiping the app's data
+USAGE
       exit 0 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
 
 # ──────────────────────────── helpers ─────────────────────────────
+# printf '%b' rather than echo so a \n in a message renders as a line break
+# whether or not colour is on -- plain echo would print it literally.
 if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
-  info()  { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
-  ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
-  warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
-  fail()  { echo -e "\033[1;31m[FAIL]\033[0m  $*"; exit 1; }
+  info()  { printf '\033[1;34m[INFO]\033[0m  %b\n' "$*"; }
+  ok()    { printf '\033[1;32m[OK]\033[0m    %b\n' "$*"; }
+  warn()  { printf '\033[1;33m[WARN]\033[0m  %b\n' "$*"; }
+  fail()  { printf '\033[1;31m[FAIL]\033[0m  %b\n' "$*"; exit 1; }
 else
-  info()  { echo "[INFO]  $*"; }
-  ok()    { echo "[OK]    $*"; }
-  warn()  { echo "[WARN]  $*"; }
-  fail()  { echo "[FAIL]  $*"; exit 1; }
+  info()  { printf '[INFO]  %b\n' "$*"; }
+  ok()    { printf '[OK]    %b\n' "$*"; }
+  warn()  { printf '[WARN]  %b\n' "$*"; }
+  fail()  { printf '[FAIL]  %b\n' "$*"; exit 1; }
 fi
 
 # Cross-platform sed -i (macOS requires backup suffix)
@@ -351,11 +369,23 @@ mkdir -p "$WORK_DIR"
 info "Working directory: $WORK_DIR"
 
 # ──────────────────────────── download APK ────────────────────────
+# Cached per app and release tag, outside the work dir so it survives the wipe
+# above -- these downloads are large and never change once a tag is published.
+CACHED_APK="${CACHE_DIR}/${APP}/${RELEASE}/${APK_VARIANT}"
 SOURCE_APK="${WORK_DIR}/${APK_VARIANT}"
-info "Downloading ${APP_LABEL} ${RELEASE}..."
-curl -L --fail -o "$SOURCE_APK" "$APK_URL" \
-  || fail "Failed to download ${APP_LABEL} from $APK_URL"
-ok "Downloaded ${APP_LABEL} ($(du -h "$SOURCE_APK" | cut -f1))."
+
+if [[ "$NO_CACHE" != true ]] && [[ -s "$CACHED_APK" ]]; then
+  info "Using cached ${APK_VARIANT} ($(du -h "$CACHED_APK" | cut -f1))."
+  cp "$CACHED_APK" "$SOURCE_APK"
+else
+  info "Downloading ${APP_LABEL} ${RELEASE}..."
+  mkdir -p "$(dirname "$CACHED_APK")"
+  # Download to a temp name so an interrupted transfer never poisons the cache
+  curl -L --fail -o "${CACHED_APK}.part" "$APK_URL"     || { rm -f "${CACHED_APK}.part"; fail "Failed to download ${APP_LABEL} from $APK_URL"; }
+  mv "${CACHED_APK}.part" "$CACHED_APK"
+  cp "$CACHED_APK" "$SOURCE_APK"
+  ok "Downloaded ${APP_LABEL} ($(du -h "$SOURCE_APK" | cut -f1))."
+fi
 
 # ──────────────────────────── decompile ───────────────────────────
 DECOMPILED_DIR="${WORK_DIR}/decompiled"
@@ -436,15 +466,38 @@ if [[ -z "$SIGNED_APK" ]] || [[ ! -f "$SIGNED_APK" ]]; then
 fi
 ok "APK signed: $(basename "$SIGNED_APK")"
 
+# Copy out of build/, which the next run wipes before it starts
+mkdir -p "$DIST_DIR"
+DIST_APK="${DIST_DIR}/${APP}-${RELEASE}.apk"
+cp "$SIGNED_APK" "$DIST_APK"
+
 # ──────────────────────────── install on device ───────────────────
 if [[ "$DRY_RUN" == true ]]; then
-  info "Dry run — skipping uninstall/install. Signed APK at: ${SIGNED_APK}"
+  info "Dry run — skipping install. Signed APK at: ${DIST_APK}"
 else
-  info "Uninstalling old ${APP_LABEL} (${APP_PACKAGE})..."
-  adb uninstall "$APP_PACKAGE" &>/dev/null || true
+  # Every build is signed with uber-apk-signer's debug key, so an app that was
+  # already rebranded can be updated in place, keeping its settings and logins.
+  # A clean install is only needed when the installed copy has a different
+  # signature -- the upstream release, or nothing installed at all.
+  INSTALLED=false
+  if [[ "$FORCE_CLEAN_INSTALL" != true ]]; then
+    info "Updating ${APP_PACKAGE} in place (keeping app data)..."
+    if adb install -r "$SIGNED_APK" >/dev/null 2>&1; then
+      ok "Updated in place — app data preserved."
+      INSTALLED=true
+    else
+      info "In-place update not possible (different signature, or not installed yet)."
+    fi
+  fi
 
-  info "Installing rebranded APK..."
-  adb install "$SIGNED_APK" 2>&1 | tail -3
+  if [[ "$INSTALLED" != true ]]; then
+    warn "Clean install — ${APP_PACKAGE} settings and logins will be lost."
+    info "Uninstalling old ${APP_LABEL} (${APP_PACKAGE})..."
+    adb uninstall "$APP_PACKAGE" &>/dev/null || true
+
+    info "Installing rebranded APK..."
+    adb install "$SIGNED_APK" 2>&1 | tail -3
+  fi
 
   # Verify
   if adb shell pm list packages | grep -q "$APP_PACKAGE"; then
@@ -455,7 +508,7 @@ else
 fi
 
 # ──────────────────────────── cleanup ─────────────────────────────
-info "Keeping signed APK at: ${SIGNED_APK}"
+info "Signed APK: ${DIST_APK}"
 info "Working directory: ${WORK_DIR}"
 echo ""
 ok "All done! ${APP_LABEL} is now disguised as '${NEW_APP_NAME}' on your device."
