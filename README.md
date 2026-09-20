@@ -18,12 +18,16 @@ your Android TV device via ADB.
 
 **Must be installed on your system:**
 
-| Tool        | Install                               |
-| ----------- | ------------------------------------- |
-| Java 11+    | `choco install temurin`               |
-| adb         | `choco install scrcpy` (includes adb) |
-| ImageMagick | `choco install imagemagick`           |
-| curl        | Built into Git Bash / Windows         |
+| Tool        | Install (Windows, winget)                        | Install (macOS, brew)              |
+| ----------- | ------------------------------------------------ | ---------------------------------- |
+| Java 11+    | `winget install EclipseAdoptium.Temurin.21.JDK`  | `brew install --cask temurin`      |
+| adb         | `winget install Google.PlatformTools`            | `brew install android-platform-tools` |
+| ImageMagick | `winget install ImageMagick.ImageMagick`         | `brew install imagemagick`         |
+| curl        | Built into Git Bash / Windows                    | Built in                           |
+
+The script detects missing dependencies on startup and offers to install them for
+you via winget, choco, brew, apt, dnf, or pacman. On Windows, open a **new**
+terminal after an install so the new tools are on your PATH.
 
 ## Usage
 

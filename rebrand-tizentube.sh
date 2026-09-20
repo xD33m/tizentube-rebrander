@@ -10,10 +10,11 @@
 #   - apktool.jar
 #   - uber-apk-signer.jar
 #
-# Must be pre-installed on the system:
-#   - java  (JDK 11+)    — choco install temurin / brew install temurin / apt install default-jdk
-#   - adb               — choco install scrcpy / brew install android-platform-tools / apt install adb
-#   - ImageMagick       — choco install imagemagick / brew install imagemagick / apt install imagemagick
+# Must be pre-installed on the system (the script offers to install missing ones
+# via winget, choco, brew, apt, dnf or pacman):
+#   - java  (JDK 11+)    — winget install EclipseAdoptium.Temurin.21.JDK / brew install --cask temurin
+#   - adb               — winget install Google.PlatformTools / brew install android-platform-tools
+#   - ImageMagick       — winget install ImageMagick.ImageMagick / brew install imagemagick
 #   - curl              — built into most systems
 #
 # Usage:
@@ -85,6 +86,13 @@ get_image_size() {
   fi
 }
 
+# ImageMagick 6 ships `convert`, but on Windows C:\Windows\System32\convert.exe
+# (the FAT-to-NTFS disk utility) shadows it. Only accept a real ImageMagick.
+have_imagemagick_convert() {
+  command -v convert &>/dev/null || return 1
+  convert -version </dev/null 2>&1 | grep -qi imagemagick
+}
+
 # Resize wrapper that suppresses MSYS path mangling on Windows
 magick_resize() {
   MSYS_NO_PATHCONV=1 "$MAGICK" "$1" -resize "${2}x${3}!" "$4"
@@ -94,6 +102,8 @@ magick_resize() {
 detect_pkg_manager() {
   if command -v choco &>/dev/null; then
     echo "choco"
+  elif command -v winget &>/dev/null; then
+    echo "winget"
   elif command -v brew &>/dev/null; then
     echo "brew"
   elif command -v apt-get &>/dev/null; then
@@ -114,6 +124,7 @@ pkg_install_cmd() {
     java)
       case "$pm" in
         choco)  echo "choco install -y temurin" ;;
+        winget) echo "winget install -e --accept-source-agreements --accept-package-agreements --id EclipseAdoptium.Temurin.21.JDK" ;;
         brew)   echo "brew install --cask temurin" ;;
         apt)    echo "sudo apt-get install -y default-jdk" ;;
         dnf)    echo "sudo dnf install -y java-17-openjdk" ;;
@@ -122,6 +133,7 @@ pkg_install_cmd() {
     adb)
       case "$pm" in
         choco)  echo "choco install -y scrcpy" ;;
+        winget) echo "winget install -e --accept-source-agreements --accept-package-agreements --id Google.PlatformTools" ;;
         brew)   echo "brew install android-platform-tools" ;;
         apt)    echo "sudo apt-get install -y adb" ;;
         dnf)    echo "sudo dnf install -y android-tools" ;;
@@ -130,6 +142,7 @@ pkg_install_cmd() {
     imagemagick)
       case "$pm" in
         choco)  echo "choco install -y imagemagick" ;;
+        winget) echo "winget install -e --accept-source-agreements --accept-package-agreements --id ImageMagick.ImageMagick" ;;
         brew)   echo "brew install imagemagick" ;;
         apt)    echo "sudo apt-get install -y imagemagick" ;;
         dnf)    echo "sudo dnf install -y ImageMagick" ;;
@@ -138,6 +151,7 @@ pkg_install_cmd() {
     curl)
       case "$pm" in
         choco)  echo "choco install -y curl" ;;
+        winget) echo "winget install -e --accept-source-agreements --accept-package-agreements --id cURL.cURL" ;;
         brew)   echo "brew install curl" ;;
         apt)    echo "sudo apt-get install -y curl" ;;
         dnf)    echo "sudo dnf install -y curl" ;;
@@ -172,7 +186,7 @@ check_or_install() {
   if ! command -v "$cmd_name" &>/dev/null; then
     prompt_install "$dep_name" "$PKG_MANAGER"
     # Re-check after install
-    command -v "$cmd_name" &>/dev/null || fail "'$cmd_name' still not found after install attempt."
+    command -v "$cmd_name" &>/dev/null || fail "'$cmd_name' was installed but is not on PATH in this shell. Open a new terminal and re-run this script."
   fi
 }
 
@@ -193,17 +207,17 @@ check_or_install curl curl
 # Detect ImageMagick command (v7 uses magick, v6 uses convert)
 if command -v magick &>/dev/null; then
   MAGICK=magick
-elif command -v convert &>/dev/null; then
+elif have_imagemagick_convert; then
   MAGICK=convert
 else
   prompt_install imagemagick "$PKG_MANAGER"
   # Re-detect after install
   if command -v magick &>/dev/null; then
     MAGICK=magick
-  elif command -v convert &>/dev/null; then
+  elif have_imagemagick_convert; then
     MAGICK=convert
   else
-    fail "ImageMagick still not found after install attempt."
+    fail "ImageMagick was installed but is not on PATH in this shell. Open a new terminal and re-run this script."
   fi
 fi
 
