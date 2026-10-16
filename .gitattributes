@@ -1,0 +1,7 @@
+# Shell scripts must keep LF endings. With CRLF (e.g. a Windows checkout with
+# core.autocrlf=true) bash in WSL, Linux or macOS fails on the stray \r.
+*.sh text eol=lf
+
+# Bundled binaries
+*.jar binary
+*.png binary
