@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Static checks only: nothing here talks to a device or downloads an APK.
+      - name: Lint shell scripts
+        run: |
+          shellcheck --version
+          mapfile -t scripts < <(git ls-files '*.sh')
+          printf 'Checking %s\n' "${scripts[@]}"
+          shellcheck --severity=style "${scripts[@]}"
+
+      - name: Check line endings and syntax
+        run: |
+          for f in $(git ls-files '*.sh'); do
+            if grep -q $'\r' "$f"; then
+              echo "::error file=$f::CRLF line endings"
+              exit 1
+            fi
+            bash -n "$f"
+          done
+
+      - name: Smoke test the CLI
+        run: |
+          ./rebrand.sh --help | grep -q -- '--device-ip'
+          if ./rebrand.sh --app nope >/dev/null 2>&1; then
+            echo "::error::an unknown --app was accepted"
+            exit 1
+          fi
